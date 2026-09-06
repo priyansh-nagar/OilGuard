@@ -1,0 +1,293 @@
+================================================================================
+STAGE 2B: BASELINE CNN TRAINING PLAN
+================================================================================
+Generated: 2026-08-28
+
+================================================================================
+1. MODEL ARCHITECTURE
+================================================================================
+
+DESIGN: Lightweight CNN with Global Average Pooling
+
+INPUT:  (batch, 1, 400, 400) - Single-channel grayscale SAR patches
+OUTPUT: (batch, 1) - Binary logit (oil probability after sigmoid)
+
+ARCHITECTURE:
+-------------
+
+Conv Block 1:
+  - Conv2d(1 → 32, kernel=3×3, padding=1)
+  - BatchNorm2d(32)
+  - ReLU
+  - MaxPool2d(2×2)
+  - Output: 200×200×32
+
+Conv Block 2:
+  - Conv2d(32 → 64, kernel=3×3, padding=1)
+  - BatchNorm2d(64)
+  - ReLU
+  - MaxPool2d(2×2)
+  - Output: 100×100×64
+
+Conv Block 3:
+  - Conv2d(64 → 128, kernel=3×3, padding=1)
+  - BatchNorm2d(128)
+  - ReLU
+  - MaxPool2d(2×2)
+  - Output: 50×50×128
+
+Global Pooling:
+  - AdaptiveAvgPool2d(1×1)
+  - Output: 1×1×128
+  - Flattened: 128 features
+
+Classifier:
+  - Linear(128 → 64)
+  - ReLU
+  - Dropout(0.5)
+  - Linear(64 → 1)
+  - Output: Binary logit
+
+PARAMETERS:
+-----------
+Total: 101,441 parameters (0.39 MB)
+  - Conv layers: ~92,800 parameters
+  - BatchNorm: ~448 parameters
+  - FC layers: ~8,257 parameters
+
+IMPROVEMENT:
+  - Original design: 82,374,145 parameters
+  - New design: 101,441 parameters
+  - Reduction: 99.9% (812× smaller!)
+
+KEY DESIGN DECISIONS:
+  ✓ Used Adaptive Average Pooling instead of large FC layer
+  ✓ Added Batch Normalization for training stability
+  ✓ Reduced to 3 conv blocks (was 4)
+  ✓ Smaller FC layers (128→64→1 instead of 160K→512→128→1)
+  ✓ Single-channel input (R=G=B verified)
+
+================================================================================
+2. DATASET & SPLIT STRATEGY
+================================================================================
+
+DATASET: CSIRO Sentinel-1 SAR (Unbalanced 400×400)
+  - Class 0 (Non-Oil): 3,725 images (66.2%)
+  - Class 1 (Oil):     1,905 images (33.8%)
+  - Total:             5,630 images
+  - Image size:        400×400 pixels
+  - Format:            RGB (converted to grayscale)
+  - Total size:        66.2 MB
+
+FILENAME PATTERN ANALYSIS:
+  Format: [x]_[y]_[z]_img_[unique_id]_[country]_cls_[label].jpg
+  Example: 0_0_0_img_0bBRglmdLdC6cFxF_JAV_cls_1.jpg
+
+  Observations:
+    - All patches have prefix "0_0_0" (single extraction, not tiled)
+    - Unique 16-character ID per patch
+    - Country codes vary (JAV, GBR, SFr, etc.)
+    - No evidence of multiple patches from same scene
+
+DATA LEAKAGE RISK: ✓ LOW
+  - Each patch appears to be from independent scenes
+  - No shared scene identifiers detected
+  - Random stratified split is scientifically appropriate
+
+SPLIT STRATEGY: Random Stratified (70/15/15)
+  - Train:      70% (~3,940 images)
+  - Validation: 15% (~843 images)
+  - Test:       15% (~847 images)
+
+  Stratification ensures each split maintains:
+    - ~66% Class 0 (Non-Oil)
+    - ~34% Class 1 (Oil)
+
+RANDOM SEED: 42 (fixed for reproducibility)
+
+WHY THIS SPLIT IS APPROPRIATE:
+  1. No evidence of scene-level grouping (patches are independent)
+  2. Stratification maintains class balance across splits
+  3. 70/15/15 is standard for datasets this size
+  4. Test set is large enough (~847 samples) for reliable evaluation
+  5. Validation set adequate for early stopping
+
+ALTERNATIVE NOT NEEDED:
+  - Group-based split: Not required (no scene groups detected)
+  - Time-based split: Not applicable (no temporal metadata)
+
+================================================================================
+3. TRAINING CONFIGURATION
+================================================================================
+
+HYPERPARAMETERS:
+  - Batch size:        32
+  - Learning rate:     0.001
+  - Optimizer:         Adam
+  - Max epochs:        30
+  - Early stop patience: 5 epochs
+  - Device:            CPU (auto-detects GPU if available)
+
+LOSS FUNCTION:
+  - BCEWithLogitsLoss with pos_weight=1.96
+  - Applies 1.96× weight to Class 1 (oil) samples
+  - Handles class imbalance without resampling
+  - Numerically stable (combines sigmoid + BCE)
+
+IMAGE PREPROCESSING:
+  - Convert RGB to grayscale (R=G=B verified)
+  - Normalize to [0, 1] range: pixel / 255.0
+  - No data augmentation (baseline)
+  - Shape: (1, 400, 400)
+
+REGULARIZATION:
+  - Dropout: 0.5 (after each FC layer)
+  - Batch Normalization (after each conv layer)
+  - Early stopping (monitors validation loss)
+
+EARLY STOPPING:
+  - Metric: Validation loss
+  - Patience: 5 epochs
+  - Restores best model weights after training
+
+================================================================================
+4. EVALUATION METRICS
+================================================================================
+
+TEST SET EVALUATION (performed ONCE after training):
+
+METRICS:
+  ✓ Accuracy:         Overall correctness
+  ✓ Precision:        True Positives / (True Positives + False Positives)
+                      "Of predicted oil, how many are actually oil?"
+  ✓ Recall:           True Positives / (True Positives + False Negatives)
+                      "Of actual oil, how many did we find?"
+  ✓ F1 Score:         Harmonic mean of Precision and Recall
+  ✓ ROC-AUC:          Area Under ROC Curve (0.5=random, 1.0=perfect)
+  ✓ Confusion Matrix: Breakdown of predictions vs actual
+
+CONFUSION MATRIX INTERPRETATION:
+                     Predicted
+                 Non-Oil    Oil
+Actual  Non-Oil    TN       FP    <- False Positive = Non-oil classified as oil
+        Oil        FN       TP    <- False Negative = Oil classified as non-oil
+
+KEY CONCERNS:
+  - False Positives: Classifying non-oil as oil (ships, wind, algae)
+  - False Negatives: Missing actual oil spills
+
+================================================================================
+5. IMPORTANT LIMITATIONS
+================================================================================
+
+WHAT THIS MODEL DOES:
+  ✓ Classifies pre-cropped 400×400 SAR patches as oil/non-oil
+  ✓ Works on patches from the CSIRO dataset distribution
+
+WHAT THIS MODEL DOES NOT DO:
+  ✗ Detect oil spills in full-size Sentinel-1 scenes
+  ✗ Localize where oil is within a large image
+  ✗ Handle arbitrary image sizes (trained on 400×400)
+  ✗ Distinguish oil types or spill severity
+  ✗ Account for look-alike filtering in a full pipeline
+  ✗ Provide calibrated probabilities (raw sigmoid outputs)
+
+NEXT STEPS AFTER BASELINE:
+  1. Integrate patch classifier into sliding-window detector
+  2. Add look-alike filtering (ships, algae, wind patterns)
+  3. Implement uncertainty quantification
+  4. Test on Sanchi historical case
+  5. Consider transfer learning if baseline is insufficient
+
+================================================================================
+6. EXPECTED PERFORMANCE
+================================================================================
+
+TRAINING TIME (CPU):
+  - Per epoch: 5-15 minutes (modern CPU)
+  - Total: 30-90 minutes (with early stopping)
+  - Batch of 32: ~19.5 MB memory
+
+BASELINE ACCURACY EXPECTATIONS:
+  - Target accuracy: 75-90%
+  - This is a well-labeled, balanced dataset
+  - SAR oil signatures are relatively distinct
+
+LIKELY FAILURE MODES:
+  1. Ships (dark, similar to oil in SAR)
+  2. Low-wind areas (smooth water, looks like oil dampens waves)
+  3. Algae blooms (organic matter, similar texture)
+  4. Rain cells (smooth surface)
+
+PRECISION vs RECALL TRADEOFF:
+  - High Precision: Fewer false alarms, may miss some oil
+  - High Recall: Catch more oil, more false alarms
+  - For oil spill detection: Recall may be more important
+    (better to investigate false alarm than miss a real spill)
+
+================================================================================
+7. DATA INTEGRITY CHECKS
+================================================================================
+
+✓ All 5,630 images are valid and loadable
+✓ All images are 400×400 pixels
+✓ All images are RGB format (converted to grayscale)
+✓ No corrupted files detected
+✓ No duplicate filenames
+✓ Class labels match directory structure
+
+VERIFIED:
+  ✓ R = G = B channels (single-channel SAR data)
+  ✓ Class imbalance ratio: 1.96:1 (Non-Oil : Oil)
+  ✓ No scene-level grouping detected
+  ✓ Patches from diverse geographic locations
+
+================================================================================
+8. REPRODUCIBILITY
+================================================================================
+
+FIXED RANDOM SEEDS:
+  - Python random: 42
+  - NumPy: 42
+  - PyTorch: 42
+
+DETERMINISTIC OPERATIONS:
+  ✓ Data split is reproducible
+  ✓ Weight initialization is reproducible
+  ✓ Training order is reproducible (fixed shuffle seed)
+
+MODEL CHECKPOINT:
+  - Saved to: backend/ml/outputs/oil_spill_cnn_baseline.pt
+  - Contains:
+    - Model state dict (weights)
+    - Test metrics
+    - Training configuration
+
+================================================================================
+9. NEXT ACTIONS
+================================================================================
+
+READY TO PROCEED:
+  ✓ Model architecture verified (101K parameters)
+  ✓ Dataset structure analyzed (no data leakage risk)
+  ✓ Split strategy validated (random stratified)
+  ✓ Class weighting configured (1.96× for oil)
+  ✓ All dependencies installed (PyTorch, scikit-learn)
+
+COMMAND TO RUN TRAINING:
+  cd "C:\Users\amit nagar\Projects\oilguard"
+  python backend\ml\train_baseline.py
+
+ESTIMATED COMPLETION TIME:
+  30-90 minutes on CPU
+
+POST-TRAINING REVIEW:
+  1. Examine confusion matrix for failure patterns
+  2. Check if precision/recall balance is appropriate
+  3. Identify which non-oil samples are confused with oil
+  4. Decide if transfer learning or augmentation is needed
+  5. Consider next integration step (sliding window detector)
+
+================================================================================
+END OF TRAINING PLAN
+================================================================================

@@ -1,0 +1,273 @@
+================================================================================
+PROPOSED CHANGES TO train_baseline.py
+================================================================================
+
+SUMMARY:
+Add robust checkpointing and resume capability to handle training interruptions.
+
+================================================================================
+1. CONFIGURATION CHANGES (Lines 54-58)
+================================================================================
+
+BEFORE:
+-------
+BATCH_SIZE = 32
+LEARNING_RATE = 0.001
+NUM_EPOCHS = 30
+EARLY_STOP_PATIENCE = 5
+
+AFTER:
+------
+BATCH_SIZE = 32
+LEARNING_RATE = 0.001
+NUM_EPOCHS = 15                    # Changed: 30 → 15
+EARLY_STOP_PATIENCE = 3            # Changed: 5 → 3
+
+REASON: Shorter baseline run with tighter early stopping
+
+================================================================================
+2. NEW CHECKPOINT PATHS (After line 65)
+================================================================================
+
+ADD:
+----
+# Checkpoint paths
+CHECKPOINT_PATH = OUTPUT_DIR / "checkpoint_latest.pt"
+BEST_MODEL_PATH = OUTPUT_DIR / "oil_spill_cnn_best.pt"
+FINAL_MODEL_PATH = OUTPUT_DIR / "oil_spill_cnn_baseline.pt"
+
+REASON: Separate files for latest checkpoint, best model, and final model
+
+================================================================================
+3. NEW HELPER FUNCTIONS (After prepare_data function, ~line 257)
+================================================================================
+
+ADD THREE NEW FUNCTIONS:
+
+A) save_checkpoint():
+   - Saves epoch, model state, optimizer state, best_val_loss, history
+   - Called after every epoch
+   - Overwrites checkpoint_latest.pt
+
+B) load_checkpoint():
+   - Loads checkpoint if it exists
+   - Returns: start_epoch, model_state, optimizer_state, best_val_loss, history
+   - Returns None if no checkpoint
+
+C) save_best_model():
+   - Saves only the best model weights (lighter file)
+   - Called when validation loss improves
+   - Saved to oil_spill_cnn_best.pt
+
+CODE TO ADD:
+------------
+def save_checkpoint(epoch, model, optimizer, best_val_loss, history):
+    """Save training checkpoint after each epoch."""
+    checkpoint = {
+        'epoch': epoch,
+        'model_state_dict': model.state_dict(),
+        'optimizer_state_dict': optimizer.state_dict(),
+        'best_val_loss': best_val_loss,
+        'history': history,
+        'random_seed': RANDOM_SEED,
+        'config': {
+            'batch_size': BATCH_SIZE,
+            'learning_rate': LEARNING_RATE,
+            'num_epochs': NUM_EPOCHS,
+        }
+    }
+    torch.save(checkpoint, CHECKPOINT_PATH)
+    print(f"  → Checkpoint saved (epoch {epoch})", flush=True)
+
+
+def load_checkpoint():
+    """Load training checkpoint if it exists."""
+    if CHECKPOINT_PATH.exists():
+        checkpoint = torch.load(CHECKPOINT_PATH)
+        print(f"Found checkpoint at epoch {checkpoint['epoch']}")
+        return checkpoint
+    return None
+
+
+def save_best_model(model, metrics):
+    """Save the best model (lighter than full checkpoint)."""
+    torch.save({
+        'model_state_dict': model.state_dict(),
+        'metrics': metrics,
+    }, BEST_MODEL_PATH)
+    print(f"  → Best model saved", flush=True)
+
+REASON: Enable resume and save best model separately
+
+================================================================================
+4. MODIFIED train_model() FUNCTION (Lines 277-360)
+================================================================================
+
+CHANGES:
+
+A) Function signature change:
+   BEFORE: def train_model(model, train_loader, val_loader, criterion, optimizer, num_epochs):
+   AFTER:  def train_model(model, train_loader, val_loader, criterion, optimizer, num_epochs, start_epoch=0, loaded_best_val_loss=None, loaded_history=None):
+
+B) Add history tracking:
+   - Track train_loss, train_acc, val_loss, val_acc per epoch
+   - Initialize from loaded_history if resuming
+
+C) Add checkpoint saving:
+   - Call save_checkpoint() after EVERY completed epoch
+   - Includes: epoch, model, optimizer, best_val_loss, history
+
+D) Modify best model tracking:
+   - Call save_best_model() when val_loss improves
+   - Save to separate best_model file
+
+E) Update epoch loop:
+   - Start from start_epoch instead of 0
+   - Print "Resuming from epoch X" if start_epoch > 0
+
+DETAILED CHANGES:
+-----------------
+- Line 277: Add new parameters to function signature
+- Line 286-289: Initialize history dict or load from checkpoint
+- Line 293: Change "for epoch in range(num_epochs):" to "for epoch in range(start_epoch, num_epochs):"
+- Line 340-342: Replace best_model_state logic with save_best_model() call
+- Line 350: Add save_checkpoint() call before early stopping check
+- Line 357: Return model, train_time, and history
+
+REASON: Enable resume and save progress incrementally
+
+================================================================================
+5. MODIFIED main() FUNCTION (Lines 438-500+)
+================================================================================
+
+CHANGES:
+
+A) Add checkpoint loading logic BEFORE training:
+   - Check for existing checkpoint
+   - If found: load epoch, model state, optimizer state, best_val_loss, history
+   - Ask user or auto-resume
+
+B) Initialize optimizer and model from checkpoint if resuming
+
+C) Pass resume parameters to train_model()
+
+D) Save final model with updated path
+
+NEW CODE SECTION (after model/optimizer initialization):
+---------------------------------------------------------
+# Check for existing checkpoint
+checkpoint = load_checkpoint()
+start_epoch = 0
+loaded_history = None
+loaded_best_val_loss = None
+
+if checkpoint is not None:
+    print(f"Resuming from epoch {checkpoint['epoch'] + 1}")
+    print(f"Previous best val loss: {checkpoint['best_val_loss']:.4f}")
+    print()
+    model.load_state_dict(checkpoint['model_state_dict'])
+    optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
+    start_epoch = checkpoint['epoch'] + 1
+    loaded_best_val_loss = checkpoint['best_val_loss']
+    loaded_history = checkpoint['history']
+
+REASON: Enable automatic resume from interruption
+
+================================================================================
+6. FILES THAT WILL BE MODIFIED
+================================================================================
+
+ONLY ONE FILE WILL BE MODIFIED:
+✓ backend/ml/train_baseline.py
+
+NO OTHER FILES WILL BE CHANGED:
+✗ frontend/ (unchanged)
+✗ backend/app/ (FastAPI - unchanged)
+✗ data/ (dataset - unchanged)
+✗ Model architecture (unchanged - still 101K params)
+
+================================================================================
+7. NEW FILES THAT WILL BE CREATED DURING TRAINING
+================================================================================
+
+During training, these files will be created in backend/ml/outputs/:
+
+1. checkpoint_latest.pt
+   - Full checkpoint with optimizer state
+   - Overwritten after every epoch
+   - ~400 KB (model + optimizer state)
+
+2. oil_spill_cnn_best.pt
+   - Best model weights only (lighter)
+   - Updated when validation loss improves
+   - ~400 KB (model state only)
+
+3. oil_spill_cnn_baseline.pt
+   - Final model after training completes
+   - Includes test metrics
+   - ~400 KB
+
+REASON: Separate latest, best, and final models
+
+================================================================================
+8. BEHAVIOR CHANGES
+================================================================================
+
+BEFORE:
+- Training runs start to finish
+- Only saves model at the very end
+- Interruption = complete restart
+- Test evaluation happens once at end
+
+AFTER:
+- Training can be interrupted and resumed
+- Saves checkpoint after every epoch
+- Saves best model whenever val loss improves
+- Automatically resumes from last checkpoint
+- Test evaluation still happens once at end (unchanged)
+
+EARLY STOPPING:
+- Patience reduced from 5 → 3 epochs
+- Faster convergence detection
+
+TOTAL EPOCHS:
+- Reduced from 30 → 15 epochs
+- ~5-6 hours instead of 10-12 hours
+
+================================================================================
+9. RESUME BEHAVIOR
+================================================================================
+
+When script is run again after interruption:
+1. Detects checkpoint_latest.pt exists
+2. Prints "Resuming from epoch X"
+3. Loads model and optimizer state
+4. Continues training from where it left off
+5. Test set remains untouched until all training completes
+
+================================================================================
+10. VERIFICATION CHECKLIST
+================================================================================
+
+✓ Test set untouched until final evaluation
+✓ Checkpoints save after every epoch
+✓ Best model saved separately when val loss improves
+✓ Resume works automatically
+✓ Early stopping patience: 5 → 3
+✓ Max epochs: 30 → 15
+✓ 101K parameter architecture unchanged
+✓ Dataset unchanged
+✓ Frontend/backend API unchanged
+✓ Random seed preserved in checkpoint
+
+================================================================================
+END OF PROPOSED CHANGES
+================================================================================
+
+NEXT STEP:
+If you approve these changes, I will:
+1. Modify backend/ml/train_baseline.py
+2. Show you a summary of what was changed
+3. Wait for your approval to start training
+
+The modified script will be ~50 lines longer due to checkpoint functions.

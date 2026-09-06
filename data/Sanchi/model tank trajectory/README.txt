@@ -1,0 +1,1 @@
+Data are formated as Time, Latitude and Longitude in a time step of 15 mintues.
