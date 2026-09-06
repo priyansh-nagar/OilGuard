@@ -1,86 +1,402 @@
-# OilGuard (Stage 1)
+# OilGuard
 
-SIH-style MVP: **fully simulated** oil-spill investigation.
+### AI-Powered Marine Oil Spill Detection & Vessel Investigation
 
-Upload any image. A small Python API returns demo spill facts and three
-demo ships. The website shows them on a Leaflet map. Nothing here is a
-real satellite detection, real AIS lookup, or a legal finding.
+OilGuard is an SIH-style MVP for detecting potential oil spills from uploaded SAR imagery and investigating nearby vessels that may be associated with a detected spill.
 
-**Every result is labeled `SIMULATED / DEMO DATA`.**
-The attribution score is a simple ranking heuristic. It is **not** legal
-guilt and **not** a statistically calibrated probability.
+The system combines a trained **PyTorch SmallCNN** image-classification model with **simulated AIS vessel trajectories** and a deterministic vessel-attribution heuristic to demonstrate an end-to-end maritime intelligence workflow.
 
-## What talks to what
+> **Important:** OilGuard is a prototype. Vessel attribution is a ranking based on spatial, temporal, and trajectory consistency. It is not legal proof of responsibility or a statistically calibrated probability of guilt.
 
+---
+
+## What OilGuard Does
+
+```text
+SAR Image Upload
+       │
+       ▼
+┌─────────────────────┐
+│   SmallCNN Model    │
+│   PyTorch Inference │
+└──────────┬──────────┘
+           │
+           ▼
+   Oil Spill Detected?
+       │         │
+      YES        NO
+       │         │
+       ▼         ▼
+ Spill Location  Clear
+       │
+       ▼
+ Simulated AIS
+ Vessel Trajectories
+       │
+       ▼
+ Spatial + Temporal
+ + Trajectory Analysis
+       │
+       ▼
+ Candidate Vessel Ranking
+       │
+       ▼
+ Maritime Investigation
+ Dashboard
 ```
-Browser (React)
-    POST /api/analyze  (the image file)
-        -> FastAPI
-            -> simulated detector
-            -> simulated AIS
-            -> heuristic ranking
-        <- JSON investigation result
-    Leaflet map draws spill + ships
+
+---
+
+## Key Features
+
+- 🛰️ **SAR Image Analysis**
+  - Upload SAR imagery through the web interface.
+  - Image preprocessing and inference are performed by the backend.
+
+- 🤖 **Machine Learning Detection**
+  - PyTorch-based SmallCNN binary classifier.
+  - Classifies imagery as potential oil-spill / non-oil-spill.
+  - Frozen detection threshold: **0.52**.
+
+- 🌍 **Interactive Maritime Globe**
+  - MapLibre GL JS with MapTiler satellite imagery.
+  - Arabian Sea / western India investigation view.
+  - Interactive zoom, pan and vessel selection.
+
+- 🚢 **Vessel Tracking**
+  - Displays candidate vessels around the detected spill.
+  - Shows vessel trajectories.
+  - Supports vessel playback.
+
+- 📊 **Vessel Attribution Ranking**
+  - Candidates are ranked using:
+    - Spatial consistency
+    - Temporal consistency
+    - Trajectory consistency
+  - Scores are deterministic and intended for demonstration.
+
+- 🔎 **Investigation Dashboard**
+  - Detection status
+  - AI confidence
+  - Detection coordinates
+  - Spill visualization
+  - Candidate vessel information
+  - Investigation scores
+  - Vessel trajectory playback
+
+---
+
+## Technology Stack
+
+### Frontend
+
+- React.js
+- Vite
+- JavaScript
+- CSS
+- MapLibre GL JS
+- MapTiler
+
+### Backend
+
+- Python
+- FastAPI
+- REST API
+
+### Machine Learning
+
+- PyTorch
+- SmallCNN
+- Grayscale SAR image preprocessing
+
+### Data
+
+- SAR imagery
+- Simulated AIS trajectories
+- Prototype geospatial investigation data
+
+---
+
+## Project Structure
+
+```text
+OilGuard/
+│
+├── backend/
+│   ├── app/
+│   │   ├── main.py
+│   │   ├── schemas.py
+│   │   └── services/
+│   │       ├── detector.py
+│   │       ├── ais.py
+│   │       └── attribution.py
+│   │
+│   ├── ml/
+│   │   └── outputs/
+│   │       └── class_weight_25/
+│   │           └── oil_spill_cnn_best.pt
+│   │
+│   └── requirements.txt
+│
+├── frontend/
+│   ├── src/
+│   │   ├── App.jsx
+│   │   ├── api.js
+│   │   ├── components/
+│   │   └── styles.css
+│   ├── package.json
+│   └── vite.config.js
+│
+├── data/
+│
+├── .gitignore
+└── README.md
 ```
 
-Later you can replace `backend/app/services/detector.py` and
-`backend/app/services/ais.py` with real components. Keep the same JSON
-fields so the frontend does not need a rewrite.
+---
 
-## Run locally (Windows PowerShell)
+## Backend API
 
-Use **two terminals**. Start the backend first.
+The main analysis endpoint is:
 
-### 1. Backend (FastAPI)
+```text
+POST /api/analyze
+```
+
+It accepts an uploaded image and returns the investigation result as JSON.
+
+The response contains information such as:
+
+```text
+Detection status
+AI confidence
+Spill center
+Estimated area
+Detection timestamp
+Candidate vessels
+Vessel trajectories
+Attribution scores
+```
+
+API documentation is available through FastAPI's interactive documentation:
+
+```text
+/docs
+```
+
+---
+
+## Machine Learning Pipeline
+
+The current detection pipeline uses:
+
+```text
+Input SAR Image
+      │
+      ▼
+Grayscale Conversion
+      │
+      ▼
+Float32 Normalization
+      │
+      ▼
+SmallCNN
+      │
+      ▼
+Oil Probability
+      │
+      ▼
+Threshold = 0.52
+      │
+      ▼
+Detection Result
+```
+
+The model uses a single binary logit with sigmoid-based oil probability.
+
+The current model checkpoint is:
+
+```text
+backend/ml/outputs/class_weight_25/oil_spill_cnn_best.pt
+```
+
+---
+
+## Vessel Attribution
+
+OilGuard currently uses **simulated AIS trajectories** for the prototype.
+
+Candidate vessels are evaluated using three components:
+
+```text
+Spatial Consistency       40%
+Temporal Consistency      30%
+Trajectory Consistency    30%
+```
+
+The system combines these components into an attribution ranking.
+
+### Important
+
+The attribution score represents **prototype investigative relevance**, not:
+
+- Legal guilt
+- Confirmed responsibility
+- A statistically calibrated probability
+- Proof that a vessel caused the spill
+
+Real AIS data and validated ocean-drift modelling would be required for operational deployment.
+
+---
+
+## Spill Visualization
+
+When a potential spill is detected, OilGuard displays a visual investigation zone around the prototype detection center.
+
+The current spill coordinates and estimated area are part of the MVP demonstration and should not be interpreted as independently geolocated measurements produced by the image classifier.
+
+---
+
+## Data & Prototype Limitations
+
+The current version is an **MVP / proof of concept**.
+
+### Currently implemented
+
+- Trained CNN inference
+- SAR image upload
+- Oil-spill classification
+- Interactive globe
+- Vessel visualization
+- Simulated AIS trajectories
+- Vessel trajectory playback
+- Deterministic attribution ranking
+- Investigation dashboard
+
+### Currently simulated / prototype
+
+- AIS vessel trajectories
+- Vessel positions used for the demonstration
+- Spill coordinates
+- Spill area estimation
+- Ocean-drift modelling
+- Vessel attribution
+
+### Not currently implemented
+
+- Live satellite data feeds
+- Live AIS API integration
+- Production-grade ocean-current modelling
+- Operational maritime surveillance
+- Legal or enforcement-grade attribution
+- User authentication
+- Database-backed investigation history
+
+---
+
+## Running Locally
+
+### 1. Backend
+
+Open a terminal:
 
 ```powershell
 cd "C:\Users\amit nagar\Projects\oilguard\backend"
+
 python -m venv .venv
+
 .\.venv\Scripts\Activate.ps1
+
 pip install -r requirements.txt
+
 uvicorn app.main:app --reload --host 127.0.0.1 --port 8000
 ```
 
-API docs (optional): http://127.0.0.1:8000/docs
+Backend API:
 
-If PowerShell blocks the venv script, run:
-
-```powershell
-Set-ExecutionPolicy -Scope CurrentUser RemoteSigned
+```text
+http://127.0.0.1:8000
 ```
 
-Then activate again.
+FastAPI documentation:
 
-### 2. Frontend (React + Vite)
+```text
+http://127.0.0.1:8000/docs
+```
+
+---
+
+### 2. Frontend
+
+Open a second terminal:
 
 ```powershell
 cd "C:\Users\amit nagar\Projects\oilguard\frontend"
+
 npm install
+
 npm run dev
 ```
 
-Open the URL Vite prints, usually http://localhost:5173
+Open the URL displayed by Vite, usually:
 
-The frontend proxies `/api` to the backend, so keep both processes running.
+```text
+http://localhost:5173
+```
 
-## File map (beginner)
+The frontend communicates with the FastAPI backend through the `/api` endpoint.
 
-| Path | Why it exists |
-| --- | --- |
-| `backend/app/main.py` | HTTP server: `/api/analyze` |
-| `backend/app/schemas.py` | JSON field names (the contract) |
-| `backend/app/services/detector.py` | Fake spill from filename/size |
-| `backend/app/services/ais.py` | Three fake nearby ships |
-| `backend/app/services/attribution.py` | Demo ranking scores + explanations |
-| `frontend/src/api.js` | Sends the image to the API |
-| `frontend/src/App.jsx` | Page layout and upload flow |
-| `frontend/src/components/UploadPanel.jsx` | File picker |
-| `frontend/src/components/InvestigationDashboard.jsx` | Results dashboard |
-| `frontend/src/components/SpillMap.jsx` | Leaflet map |
-| `frontend/src/components/CandidateCard.jsx` | One candidate vessel |
-| `frontend/src/styles.css` | Look and feel |
+---
 
-## Not in Stage 1
+## Intended Workflow
 
-No real satellites, AIS APIs, machine learning, database, login,
-blockchain, or chatbot.
+```text
+1. Upload SAR imagery
+          ↓
+2. Run AI inference
+          ↓
+3. Detect potential oil spill
+          ↓
+4. Display investigation zone
+          ↓
+5. Display candidate vessels
+          ↓
+6. Inspect vessel trajectories
+          ↓
+7. Compare spatial / temporal /
+   trajectory consistency
+          ↓
+8. Rank candidate vessels
+```
+
+---
+
+## Future Development
+
+The current architecture is designed so that prototype components can be replaced with real systems without redesigning the complete frontend.
+
+Potential future integrations include:
+
+- Real satellite/SAR data sources
+- Live AIS feeds
+- Improved deep-learning architectures
+- Oil-spill segmentation
+- Real spill geolocation
+- Ocean-current and wind data
+- Physics-based oil drift modelling
+- Historical vessel trajectory analysis
+- Persistent investigation database
+- Automated alerts
+- Multi-satellite data fusion
+
+---
+
+## Disclaimer
+
+**OilGuard is an experimental prototype developed for demonstration and hackathon purposes.**
+
+The current AIS data, vessel trajectories, spill coordinates and attribution calculations are simulated or prototype data.
+
+The AI model demonstrates the technical workflow for oil-spill image classification but should not be treated as an operational satellite-monitoring system without further validation.
+
+**Vessel attribution results are investigative rankings only and must not be interpreted as legal findings, confirmed responsibility, or statistically calibrated probabilities.**
